@@ -156,22 +156,15 @@ progs_btrfs_command_group = btrfs-send \
 	btrfs-subvolume-snapshot \
 	btrfs-subvolume-delete
 
-# build all by default
-progs = $(progs_install) $(progs_btrfs_command_group) btrfsck btrfs-corrupt-block btrfs-calc-size
+# PATCH: build only separated progs
+progs = $(progs_btrfs_command_group)
 
 # install only selected
-progs_install = btrfs mkfs.btrfs btrfs-debug-tree \
-	btrfs-map-logical btrfs-image btrfs-zero-log \
-	btrfs-find-root btrfstune btrfs-show-super \
-	btrfs-select-super
+progs_install = $(progs_btrfs_command_group)
 
-progs_extra = btrfs-fragments
+progs_extra =
 
 progs_static = $(foreach p,$(progs),$(p).static)
-
-ifneq ($(DISABLE_BTRFSCONVERT),1)
-progs_install += btrfs-convert
-endif
 
 progs_install_setcap = $(progs_btrfs_command_group)
 
