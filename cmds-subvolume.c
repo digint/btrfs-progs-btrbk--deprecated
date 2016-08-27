@@ -248,7 +248,7 @@ static const char * const cmd_subvol_delete_usage[] = {
 	NULL
 };
 
-static int cmd_subvol_delete(int argc, char **argv)
+int cmd_subvol_delete(int argc, char **argv)
 {
 	int res, ret = 0;
 	int cnt;
@@ -420,7 +420,7 @@ static const char * const cmd_subvol_list_usage[] = {
 	NULL,
 };
 
-static int cmd_subvol_list(int argc, char **argv)
+int cmd_subvol_list(int argc, char **argv)
 {
 	struct btrfs_list_filter_set *filter_set;
 	struct btrfs_list_comparer_set *comparer_set;
@@ -599,7 +599,7 @@ static const char * const cmd_subvol_snapshot_usage[] = {
 	NULL
 };
 
-static int cmd_subvol_snapshot(int argc, char **argv)
+int cmd_subvol_snapshot(int argc, char **argv)
 {
 	char	*subvol, *dst;
 	int	res, retval;
@@ -901,7 +901,7 @@ static const char * const cmd_subvol_show_usage[] = {
 	NULL
 };
 
-static int cmd_subvol_show(int argc, char **argv)
+int cmd_subvol_show(int argc, char **argv)
 {
 	struct root_info get_ri;
 	struct btrfs_list_filter_set *filter_set = NULL;

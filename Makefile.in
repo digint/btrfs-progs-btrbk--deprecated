@@ -147,6 +147,14 @@ endif
 
 MAKEOPTS = --no-print-directory Q=$(Q)
 
+# single-command executables
+progs_btrfs_command_group = btrfs-send \
+	btrfs-receive \
+	btrfs-subvolume-list \
+	btrfs-subvolume-show \
+	btrfs-subvolume-snapshot \
+	btrfs-subvolume-delete
+
 # build all by default
 progs = $(progs_install) btrfsck btrfs-corrupt-block btrfs-calc-size
 
@@ -155,6 +163,8 @@ progs_install = btrfs mkfs.btrfs btrfs-debug-tree \
 	btrfs-map-logical btrfs-image btrfs-zero-log \
 	btrfs-find-root btrfstune btrfs-show-super \
 	btrfs-select-super
+
+progs_install += $(progs_btrfs_command_group)
 
 progs_extra = btrfs-fragments
 
@@ -172,6 +182,14 @@ btrfs_fragments_libs = -lgd -lpng -ljpeg -lfreetype
 btrfs_debug_tree_objects = cmds-inspect-dump-tree.o
 btrfs_show_super_objects = cmds-inspect-dump-super.o
 btrfs_calc_size_objects = cmds-inspect-tree-stats.o
+
+# single-command executables, used by btrbk backend "btrfs-progs-separated"
+btrfs_send_objects = cmds-send.o
+btrfs_receive_objects = cmds-receive.o
+btrfs_subvolume_list_objects = cmds-subvolume.o
+btrfs_subvolume_show_objects = cmds-subvolume.o
+btrfs_subvolume_snapshot_objects = cmds-subvolume.o
+btrfs_subvolume_delete_objects = cmds-subvolume.o
 
 # collect values of the variables above
 standalone_deps = $(foreach dep,$(patsubst %,%_objects,$(subst -,_,$(filter btrfs-%, $(progs)))),$($(dep)))
