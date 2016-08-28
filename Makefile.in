@@ -38,6 +38,7 @@ AR = @AR@
 RM = @RM@
 RMDIR = @RMDIR@
 INSTALL = @INSTALL@
+SETCAP = @SETCAP@
 DISABLE_DOCUMENTATION = @DISABLE_DOCUMENTATION@
 DISABLE_BTRFSCONVERT = @DISABLE_BTRFSCONVERT@
 BTRFSCONVERT_EXT2 = @BTRFSCONVERT_EXT2@
@@ -147,22 +148,25 @@ endif
 
 MAKEOPTS = --no-print-directory Q=$(Q)
 
-# build all by default
-progs = $(progs_install) btrfsck btrfs-corrupt-block btrfs-calc-size
+# single-command executables
+progs_btrfs_command_group = btrfs-send \
+	btrfs-receive \
+	btrfs-subvolume-list \
+	btrfs-subvolume-show \
+	btrfs-subvolume-snapshot \
+	btrfs-subvolume-delete
+
+# PATCH: build only separated progs
+progs = $(progs_btrfs_command_group)
 
 # install only selected
-progs_install = btrfs mkfs.btrfs btrfs-debug-tree \
-	btrfs-map-logical btrfs-image btrfs-zero-log \
-	btrfs-find-root btrfstune btrfs-show-super \
-	btrfs-select-super
+progs_install = $(progs_btrfs_command_group)
 
-progs_extra = btrfs-fragments
+progs_extra =
 
 progs_static = $(foreach p,$(progs),$(p).static)
 
-ifneq ($(DISABLE_BTRFSCONVERT),1)
-progs_install += btrfs-convert
-endif
+progs_install_setcap = $(progs_btrfs_command_group)
 
 # external libs required by various binaries; for btrfs-foo,
 # specify btrfs_foo_libs = <list of libs>; see $($(subst...)) rules below
@@ -173,8 +177,24 @@ btrfs_debug_tree_objects = cmds-inspect-dump-tree.o
 btrfs_show_super_objects = cmds-inspect-dump-super.o
 btrfs_calc_size_objects = cmds-inspect-tree-stats.o
 
+# single-command executables, used by btrbk backend "btrfs-progs-separated"
+btrfs_send_objects = cmds-send.o
+btrfs_receive_objects = cmds-receive.o
+btrfs_subvolume_list_objects = cmds-subvolume.o
+btrfs_subvolume_show_objects = cmds-subvolume.o
+btrfs_subvolume_snapshot_objects = cmds-subvolume.o
+btrfs_subvolume_delete_objects = cmds-subvolume.o
+
 # collect values of the variables above
 standalone_deps = $(foreach dep,$(patsubst %,%_objects,$(subst -,_,$(filter btrfs-%, $(progs)))),$($(dep)))
+
+# linux capabilities (caps) needed; used by "install-setcap-%" below
+install_setcap_btrfs_send = "cap_sys_admin,cap_fowner,cap_dac_read_search"
+install_setcap_btrfs_receive = "cap_sys_admin,cap_fowner,cap_chown,cap_mknod,cap_dac_override,cap_dac_read_search"
+install_setcap_btrfs_subvolume_list = "cap_sys_admin,cap_fowner,cap_dac_read_search"
+install_setcap_btrfs_subvolume_show = "cap_sys_admin,cap_fowner,cap_dac_read_search"
+install_setcap_btrfs_subvolume_snapshot = "cap_sys_admin,cap_fowner,cap_dac_override,cap_dac_read_search"
+install_setcap_btrfs_subvolume_delete = "cap_sys_admin,cap_dac_override"
 
 SUBDIRS =
 BUILDDIRS = $(patsubst %,build-%,$(SUBDIRS))
@@ -452,6 +472,16 @@ install-static: $(progs_static) $(INSTALLDIRS)
 	$(INSTALL) $(progs_static) $(DESTDIR)$(bindir)
 	# btrfsck is a link to btrfs in the src tree, make it so for installed file as well
 	$(LN_S) -f btrfs.static $(DESTDIR)$(bindir)/btrfsck.static
+
+# install, and set linux capabilities for a single-command executable
+# defined in install_setcap_* above, using setcap(8)
+install-setcap-%: $(subst install-setcap-,,$@)
+	$(INSTALL) -m755 -d $(DESTDIR)$(bindir)
+	$(INSTALL) -m750 -g btrfs $(subst install-setcap-,,$@) $(DESTDIR)$(bindir)
+	$(SETCAP) $($(subst -,_,$@))+ep $(DESTDIR)$(bindir)/$(subst install-setcap-,,$@)
+
+# install all $progs_install, and set linux capabilities using setcap(8)
+install-setcap: $(patsubst %,install-setcap-%,$(progs_install_setcap))
 
 $(INSTALLDIRS):
 	@echo "Making install in $(patsubst install-%,%,$@)"
