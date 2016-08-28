@@ -1,41 +1,95 @@
-Btrfs-progs
-===========
+Btrfs-progs-btrbk
+=================
 
-Userspace utilities to manage btrfs filesystems.
+This is a fork of btrfs-progs, allowing to build distinct binaries for
+specific btrfs command groups:
+
+  * btrfs-subvolume-list
+  * btrfs-subvolume-show
+  * btrfs-subvolume-snapshot
+  * btrfs-subvolume-delete
+  * btrfs-send
+  * btrfs-receive
+
+These binaries are used by btrbk if `backend btrbk-progs-btrbk` is set
+in btrbk.conf.
+
 License: GPLv2.
 
-Btrfs is a copy on write (COW) filesystem for Linux aimed at implementing
-advanced features while focusing on fault tolerance, repair and easy
-administration.
+
+Motivation
+----------
+
+While btrfs-progs offer the all-inclusive "btrfs" command, it gets
+pretty cumbersome to restrict privileges to the subcommands (command
+groups). Common approaches are to either setuid root for "/sbin/btrfs"
+(which is not recommended at all), or to write sudo rules for each
+command group.
+                        
+Separating the command groups into distinct binaries makes it easy to
+set elevated privileges (capabilities or setuid) on each command
+group. A typical use case where this is needed is when it comes to
+automated scripts, e.g. btrbk creating snapshots and send/receive them
+via ssh.
+
+Installation
+------------
+
+After building the binaries (see INSTALL documentation), instead of
+`make install`, you have an option to install the binaries along with
+elevated file capabilities (setcap) for users in the `btrfs` group:
+
+    $ sudo make install-cap
+
+Or selectively, for installing only a single subcommand:
+
+    $ sudo make install-setcap-btrfs-subvolume-list \
+                install-setcap-btrfs-subvolume-show \
+                [...]
+
+The result should be something like this:
+
+    $ sudo getcap -r /usr/local/bin/
+    /usr/local/bin/btrfs-send = cap_dac_read_search,cap_fowner,cap_sys_admin+ep
+    /usr/local/bin/btrfs-receive = cap_chown,cap_dac_override,cap_dac_read_search,cap_fowner,cap_sys_admin,cap_mknod+ep
+    /usr/local/bin/btrfs-subvolume-delete = cap_dac_override,cap_sys_admin+ep
+    /usr/local/bin/btrfs-subvolume-list = cap_dac_read_search,cap_fowner,cap_sys_admin+ep
+    /usr/local/bin/btrfs-subvolume-show = cap_dac_read_search,cap_fowner,cap_sys_admin+ep
+    /usr/local/bin/btrfs-subvolume-snapshot = cap_dac_override,cap_dac_read_search,cap_fowner,cap_sys_admin+ep
 
 
-This repository hosts following utilities:
+### Gentoo Linux
 
-* **btrfs** &mdash; the main administration tool ([manual page](https://btrfs.wiki.kernel.org/index.php/Manpage/btrfs))
-* **mkfs.btrfs** &mdash; utility to create the filesystem ([manual page](https://btrfs.wiki.kernel.org/index.php/Manpage/mkfs.btrfs))
+If you're on gentoo, grab the digint portage overlay from:
+`git://dev.tty0.ch/portage/digint-overlay.git`
 
-See INSTALL for build instructions.
+Install selected binaries, e.g. for backup source:
 
-Release cycle
--------------
+    $ echo sys-fs/btrfs-progs-btrbk \
+    filecaps \
+    btrfs-subvolume-show \
+    btrfs-subvolume-list \
+    btrfs-send \
+    btrfs-subvolume-delete \
+    btrfs-subvolume-snapshot >> /etc/portage/package.use
 
-The major version releases are time-based and follow the cycle of the linux
-kernel releases. The cycle usually takes 2 months. A minor version releases may
-happen in the meantime if there are queued bug fixes or minor useful
-improvements.
+    $ emerge sys-fs/btrfs-progs-btrbk
+
 
 Development
 -----------
 
-The patch submissions, development or general discussions take place at
-*linux-btrfs@vger.kernel.org* mailinglist, subsciption not required.
+If you would like to contribute or have found bugs:
 
+  * Visit the [btrfs-progs-btrbk project page on GitHub] and use the
+    [issues tracker] there.
+  * Talk to us on Freenode in `#btrbk`.
+
+  [btrfs-progs-btrbk project page on GitHub]: https://github.com/digint/btrfs-progs-btrbk
+  [issues tracker]: https://github.com/digint/btrfs-progs-btrbk/issues
+             
 References
 ----------
 
-* [Wiki with more information](https://btrfs.wiki.kernel.org)
-* [Btrfs-progs changelogs](https://btrfs.wiki.kernel.org/index.php/Changelog#By_version_.28btrfs-progs.29)
-* [wiki/FAQ](https://btrfs.wiki.kernel.org/index.php/FAQ)
-* [wiki/Getting started](https://btrfs.wiki.kernel.org/index.php/Getting_started)
-* [wiki/TODO](https://btrfs.wiki.kernel.org/index.php/Project_ideas#Userspace_tools_projects)
-* [wiki/Developer's FAQ](https://btrfs.wiki.kernel.org/index.php/Developer's_FAQ)
+* [btrbk](https://digint.ch/btrbk)
+* [btrfs-progs](https://github.com/kdave/btrfs-progs)
