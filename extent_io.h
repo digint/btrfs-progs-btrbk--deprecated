@@ -97,7 +97,7 @@ struct extent_buffer {
 	int refs;
 	u32 flags;
 	int fd;
-	char data[];
+	char data[] __attribute__((aligned(8)));
 };
 
 static inline void extent_buffer_get(struct extent_buffer *eb)
@@ -125,8 +125,7 @@ static inline int set_extent_buffer_uptodate(struct extent_buffer *eb)
 	return 0;
 }
 
-static inline int clear_extent_buffer_uptodate(struct extent_io_tree *tree,
-				struct extent_buffer *eb)
+static inline int clear_extent_buffer_uptodate(struct extent_buffer *eb)
 {
 	eb->flags &= ~EXTENT_UPTODATE;
 	return 0;

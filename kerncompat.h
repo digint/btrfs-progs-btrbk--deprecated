@@ -68,6 +68,14 @@
 #define ULONG_MAX       (~0UL)
 #endif
 
+#define __token_glue(a,b,c)	___token_glue(a,b,c)
+#define ___token_glue(a,b,c)	a ## b ## c
+#ifdef DEBUG_BUILD_CHECKS
+#define BUILD_ASSERT(x)		extern int __token_glue(compile_time_assert_,__LINE__,__COUNTER__)[1-2*!(x)] __attribute__((unused))
+#else
+#define BUILD_ASSERT(x)
+#endif
+
 #ifndef BTRFS_DISABLE_BACKTRACE
 #define MAX_BACKTRACE	16
 static inline void print_trace(void)
@@ -78,26 +86,26 @@ static inline void print_trace(void)
 	size = backtrace(array, MAX_BACKTRACE);
 	backtrace_symbols_fd(array, size, 2);
 }
+#endif
 
-static inline void assert_trace(const char *assertion, const char *filename,
-			      const char *func, unsigned line, int val)
+static inline void warning_trace(const char *assertion, const char *filename,
+			      const char *func, unsigned line, long val)
 {
-	if (val)
+	if (!val)
 		return;
 	if (assertion)
-		fprintf(stderr, "%s:%d: %s: Assertion `%s` failed.\n",
-			filename, line, func, assertion);
+		fprintf(stderr,
+			"%s:%d: %s: Warning: assertion `%s` failed, value %ld\n",
+			filename, line, func, assertion, val);
 	else
-		fprintf(stderr, "%s:%d: %s: Assertion failed.\n", filename,
-			line, func);
+		fprintf(stderr,
+			"%s:%d: %s: Warning: assertion failed, value %ld.\n",
+			filename, line, func, val);
+#ifndef BTRFS_DISABLE_BACKTRACE
 	print_trace();
-	exit(1);
+#endif
 }
 
-#define BUG() assert_trace(NULL, __FILE__, __func__, __LINE__, 0)
-#else
-#define BUG() assert(0)
-#endif
 
 #ifdef __CHECKER__
 #define __force    __attribute__((force))
@@ -236,9 +244,14 @@ static inline long PTR_ERR(const void *ptr)
 	return (long) ptr;
 }
 
-static inline long IS_ERR(const void *ptr)
+static inline int IS_ERR(const void *ptr)
 {
 	return IS_ERR_VALUE((unsigned long)ptr);
+}
+
+static inline int IS_ERR_OR_NULL(const void *ptr)
+{
+	return !ptr || IS_ERR(ptr);
 }
 
 /*
@@ -269,17 +282,25 @@ static inline long IS_ERR(const void *ptr)
 #define vfree(x) free(x)
 
 #ifndef BTRFS_DISABLE_BACKTRACE
-#define BUG_ON(c) assert_trace(#c, __FILE__, __func__, __LINE__, !(c))
+static inline void assert_trace(const char *assertion, const char *filename,
+			      const char *func, unsigned line, long val)
+{
+	if (!val)
+		return;
+	warning_trace(assertion, filename, func, line, val);
+	abort();
+	exit(1);
+}
+
+#define BUG_ON(c) assert_trace(#c, __FILE__, __func__, __LINE__, (long)(c))
+#define WARN_ON(c) warning_trace(#c, __FILE__, __func__, __LINE__, (long)(c))
+#define	ASSERT(c) assert_trace(#c, __FILE__, __func__, __LINE__, (long)!(c))
+#define BUG() assert_trace(NULL, __FILE__, __func__, __LINE__, 1)
 #else
 #define BUG_ON(c) assert(!(c))
-#endif
-
-#define WARN_ON(c) BUG_ON(c)
-
-#ifndef BTRFS_DISABLE_BACKTRACE
-#define	ASSERT(c) assert_trace(#c, __FILE__, __func__, __LINE__, (c))
-#else
-#define ASSERT(c) assert(c)
+#define WARN_ON(c) warning_trace(#c, __FILE__, __func__, __LINE__, (long)(c))
+#define ASSERT(c) assert(!(c))
+#define BUG() assert(0)
 #endif
 
 #define container_of(ptr, type, member) ({                      \

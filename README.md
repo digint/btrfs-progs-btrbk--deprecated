@@ -39,7 +39,7 @@ After building the binaries (see INSTALL documentation), instead of
 `make install`, you have an option to install the binaries along with
 elevated file capabilities (setcap) for users in the `btrfs` group:
 
-    $ sudo make install-cap
+    $ sudo make install-setcap
 
 Or selectively, for installing only a single subcommand:
 

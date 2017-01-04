@@ -123,7 +123,7 @@ u32 btrfs_csum_data(struct btrfs_root *root, char *data, u32 seed, size_t len)
 	return crc32c(seed, data, len);
 }
 
-void btrfs_csum_final(u32 crc, char *result)
+void btrfs_csum_final(u32 crc, u8 *result)
 {
 	put_unaligned_le32(~crc, result);
 }
@@ -131,7 +131,7 @@ void btrfs_csum_final(u32 crc, char *result)
 static int __csum_tree_block_size(struct extent_buffer *buf, u16 csum_size,
 				  int verify, int silent)
 {
-	char result[BTRFS_CSUM_SIZE];
+	u8 result[BTRFS_CSUM_SIZE];
 	u32 len;
 	u32 crc = ~(u32)0;
 
@@ -241,7 +241,7 @@ static int verify_parent_transid(struct extent_io_tree *io_tree,
 
 	ret = 1;
 out:
-	clear_extent_buffer_uptodate(io_tree, eb);
+	clear_extent_buffer_uptodate(eb);
 	return ret;
 
 }
@@ -313,10 +313,29 @@ struct extent_buffer* read_tree_block_fs_info(
 	int ret;
 	struct extent_buffer *eb;
 	u64 best_transid = 0;
+	u32 sectorsize = btrfs_super_sectorsize(fs_info->super_copy);
+	u32 nodesize = btrfs_super_nodesize(fs_info->super_copy);
 	int mirror_num = 0;
 	int good_mirror = 0;
 	int num_copies;
 	int ignore = 0;
+
+	/*
+	 * Don't even try to create tree block for unaligned tree block
+	 * bytenr.
+	 * Such unaligned tree block will free overlapping extent buffer,
+	 * causing use-after-free bugs for fuzzed images.
+	 */
+	if (bytenr < sectorsize || !IS_ALIGNED(bytenr, sectorsize)) {
+		error("tree block bytenr %llu is not aligned to sectorsize %u",
+		      bytenr, sectorsize);
+		return ERR_PTR(-EIO);
+	}
+	if (blocksize < nodesize || !IS_ALIGNED(blocksize, nodesize)) {
+		error("tree block size %u is not aligned to nodesize %u",
+		      blocksize, nodesize);
+		return ERR_PTR(-EIO);
+	}
 
 	eb = btrfs_find_create_tree_block(fs_info, bytenr, blocksize);
 	if (!eb)
@@ -459,7 +478,7 @@ int write_tree_block(struct btrfs_trans_handle *trans,
 	return write_and_map_eb(trans, root, eb);
 }
 
-int __setup_root(u32 nodesize, u32 leafsize, u32 sectorsize,
+void btrfs_setup_root(u32 nodesize, u32 leafsize, u32 sectorsize,
 			u32 stripesize, struct btrfs_root *root,
 			struct btrfs_fs_info *fs_info, u64 objectid)
 {
@@ -483,7 +502,6 @@ int __setup_root(u32 nodesize, u32 leafsize, u32 sectorsize,
 	memset(&root->root_key, 0, sizeof(root->root_key));
 	memset(&root->root_item, 0, sizeof(root->root_item));
 	root->root_key.objectid = objectid;
-	return 0;
 }
 
 static int update_cowonly_root(struct btrfs_trans_handle *trans,
@@ -616,7 +634,7 @@ static int find_and_setup_root(struct btrfs_root *tree_root,
 	u32 blocksize;
 	u64 generation;
 
-	__setup_root(tree_root->nodesize, tree_root->leafsize,
+	btrfs_setup_root(tree_root->nodesize, tree_root->leafsize,
 		     tree_root->sectorsize, tree_root->stripesize,
 		     root, fs_info, objectid);
 	ret = btrfs_find_last_root(tree_root, objectid,
@@ -652,7 +670,7 @@ static int find_and_setup_log_root(struct btrfs_root *tree_root,
 
 	blocksize = tree_root->nodesize;
 
-	__setup_root(tree_root->nodesize, tree_root->leafsize,
+	btrfs_setup_root(tree_root->nodesize, tree_root->leafsize,
 		     tree_root->sectorsize, tree_root->stripesize,
 		     log_root, fs_info, BTRFS_TREE_LOG_OBJECTID);
 
@@ -716,12 +734,16 @@ struct btrfs_root *btrfs_read_fs_root_no_cache(struct btrfs_fs_info *fs_info,
 		goto insert;
 	}
 
-	__setup_root(tree_root->nodesize, tree_root->leafsize,
+	btrfs_setup_root(tree_root->nodesize, tree_root->leafsize,
 		     tree_root->sectorsize, tree_root->stripesize,
 		     root, fs_info, location->objectid);
 
 	path = btrfs_alloc_path();
-	BUG_ON(!path);
+	if (!path) {
+		free(root);
+		return ERR_PTR(-ENOMEM);
+	}
+
 	ret = btrfs_search_slot(NULL, tree_root, location, path, 0, 0);
 	if (ret != 0) {
 		if (ret > 0)
@@ -882,7 +904,8 @@ free_all:
 	return NULL;
 }
 
-int btrfs_check_fs_compatibility(struct btrfs_super_block *sb, int writable)
+int btrfs_check_fs_compatibility(struct btrfs_super_block *sb,
+				 unsigned int flags)
 {
 	u64 features;
 
@@ -901,13 +924,22 @@ int btrfs_check_fs_compatibility(struct btrfs_super_block *sb, int writable)
 		btrfs_set_super_incompat_flags(sb, features);
 	}
 
-	features = btrfs_super_compat_ro_flags(sb) &
-		~BTRFS_FEATURE_COMPAT_RO_SUPP;
-	if (writable && features) {
-		printk("couldn't open RDWR because of unsupported "
-		       "option features (%Lx).\n",
-		       (unsigned long long)features);
-		return -ENOTSUP;
+	features = btrfs_super_compat_ro_flags(sb);
+	if (flags & OPEN_CTREE_WRITES) {
+		if (flags & OPEN_CTREE_INVALIDATE_FST) {
+			/* Clear the FREE_SPACE_TREE_VALID bit on disk... */
+			features &= ~BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID;
+			btrfs_set_super_compat_ro_flags(sb, features);
+			/* ... and ignore the free space tree bit. */
+			features &= ~BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE;
+		}
+		if (features & ~BTRFS_FEATURE_COMPAT_RO_SUPP) {
+			printk("couldn't open RDWR because of unsupported "
+			       "option features (%Lx).\n",
+			       (unsigned long long)features);
+			return -ENOTSUP;
+		}
+
 	}
 	return 0;
 }
@@ -954,7 +986,7 @@ static int setup_root_or_create_block(struct btrfs_fs_info *fs_info,
 			btrfs_find_create_tree_block(fs_info, 0, nodesize);
 		if (!info_root->node)
 			return -ENOMEM;
-		clear_extent_buffer_uptodate(NULL, info_root->node);
+		clear_extent_buffer_uptodate(info_root->node);
 	}
 
 	return 0;
@@ -980,7 +1012,7 @@ int btrfs_setup_all_roots(struct btrfs_fs_info *fs_info, u64 root_tree_bytenr,
 	stripesize = btrfs_super_stripesize(sb);
 
 	root = fs_info->tree_root;
-	__setup_root(nodesize, leafsize, sectorsize, stripesize,
+	btrfs_setup_root(nodesize, leafsize, sectorsize, stripesize,
 		     root, fs_info, BTRFS_ROOT_TREE_OBJECTID);
 	blocksize = root->nodesize;
 	generation = btrfs_super_generation(sb);
@@ -1031,7 +1063,7 @@ int btrfs_setup_all_roots(struct btrfs_fs_info *fs_info, u64 root_tree_bytenr,
 	if (ret == 0)
 		fs_info->quota_enabled = 1;
 
-	if (btrfs_fs_compat_ro(fs_info, BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE)) {
+	if (btrfs_fs_compat_ro(fs_info, FREE_SPACE_TREE)) {
 		ret = find_and_setup_root(root, fs_info, BTRFS_FREE_SPACE_TREE_OBJECTID,
 					  fs_info->free_space_root);
 		if (ret) {
@@ -1131,7 +1163,9 @@ int btrfs_scan_fs_devices(int fd, const char *path,
 	dev_size = seek_ret;
 	lseek(fd, 0, SEEK_SET);
 	if (sb_bytenr > dev_size) {
-		fprintf(stderr, "Superblock bytenr is larger than device size\n");
+		error("superblock bytenr %llu is larger than device size %llu",
+				(unsigned long long)sb_bytenr,
+				(unsigned long long)dev_size);
 		return -EINVAL;
 	}
 
@@ -1143,7 +1177,7 @@ int btrfs_scan_fs_devices(int fd, const char *path,
 	}
 
 	if (!skip_devices && total_devs != 1) {
-		ret = btrfs_scan_lblkid();
+		ret = btrfs_scan_devices();
 		if (ret)
 			return ret;
 	}
@@ -1167,7 +1201,7 @@ int btrfs_setup_chunk_tree_and_device_map(struct btrfs_fs_info *fs_info,
 	sectorsize = btrfs_super_sectorsize(sb);
 	stripesize = btrfs_super_stripesize(sb);
 
-	__setup_root(nodesize, leafsize, sectorsize, stripesize,
+	btrfs_setup_root(nodesize, leafsize, sectorsize, stripesize,
 		     fs_info->chunk_root, fs_info, BTRFS_CHUNK_TREE_OBJECTID);
 
 	ret = btrfs_read_sys_array(fs_info->chunk_root);
@@ -1296,8 +1330,7 @@ static struct btrfs_fs_info *__open_ctree_fd(int fp, const char *path,
 
 	memcpy(fs_info->fsid, &disk_super->fsid, BTRFS_FSID_SIZE);
 
-	ret = btrfs_check_fs_compatibility(fs_info->super_copy,
-					   flags & OPEN_CTREE_WRITES);
+	ret = btrfs_check_fs_compatibility(fs_info->super_copy, flags);
 	if (ret)
 		goto out_devices;
 
@@ -1387,7 +1420,11 @@ struct btrfs_root *open_ctree_fd(int fp, const char *path, u64 sb_bytenr,
 	struct btrfs_fs_info *info;
 
 	/* This flags may not return fs_info with any valid root */
-	BUG_ON(flags & OPEN_CTREE_IGNORE_CHUNK_TREE_ERROR);
+	if (flags & OPEN_CTREE_IGNORE_CHUNK_TREE_ERROR) {
+		error("invalid open_ctree flags: 0x%llx",
+				(unsigned long long)flags);
+		return NULL;
+	}
 	info = __open_ctree_fd(fp, path, sb_bytenr, 0, 0, flags);
 	if (!info)
 		return NULL;
@@ -1405,7 +1442,7 @@ struct btrfs_root *open_ctree_fd(int fp, const char *path, u64 sb_bytenr,
  */
 static int check_super(struct btrfs_super_block *sb, unsigned sbflags)
 {
-	char result[BTRFS_CSUM_SIZE];
+	u8 result[BTRFS_CSUM_SIZE];
 	u32 crc;
 	u16 csum_type;
 	int csum_size;
@@ -1421,7 +1458,7 @@ static int check_super(struct btrfs_super_block *sb, unsigned sbflags)
 
 	csum_type = btrfs_super_csum_type(sb);
 	if (csum_type >= ARRAY_SIZE(btrfs_csum_sizes)) {
-		error("unsupported checksum algorithm %u\n", csum_type);
+		error("unsupported checksum algorithm %u", csum_type);
 		return -EIO;
 	}
 	csum_size = btrfs_csum_sizes[csum_type];
@@ -1533,7 +1570,7 @@ static int check_super(struct btrfs_super_block *sb, unsigned sbflags)
 	}
 	if (btrfs_super_sys_array_size(sb) < sizeof(struct btrfs_disk_key)
 			+ sizeof(struct btrfs_chunk)) {
-		error("system chunk array too small %u < %lu",
+		error("system chunk array too small %u < %zu",
 		      btrfs_super_sys_array_size(sb),
 		      sizeof(struct btrfs_disk_key) +
 		      sizeof(struct btrfs_chunk));
@@ -1562,14 +1599,20 @@ int btrfs_read_dev_super(int fd, struct btrfs_super_block *sb, u64 sb_bytenr,
 
 	if (sb_bytenr != BTRFS_SUPER_INFO_OFFSET) {
 		ret = pread64(fd, buf, BTRFS_SUPER_INFO_SIZE, sb_bytenr);
+		/* real error */
+		if (ret < 0)
+			return -errno;
+
+		/* Not large enough sb, return -ENOENT instead of normal -EIO */
 		if (ret < BTRFS_SUPER_INFO_SIZE)
-			return -1;
+			return -ENOENT;
 
 		if (btrfs_super_bytenr(buf) != sb_bytenr)
-			return -1;
+			return -EIO;
 
-		if (check_super(buf, sbflags))
-			return -1;
+		ret = check_super(buf, sbflags);
+		if (ret < 0)
+			return ret;
 		memcpy(sb, buf, BTRFS_SUPER_INFO_SIZE);
 		return 0;
 	}
@@ -1629,7 +1672,7 @@ static int write_dev_supers(struct btrfs_root *root,
 		crc = ~(u32)0;
 		crc = btrfs_csum_data(NULL, (char *)sb + BTRFS_CSUM_SIZE, crc,
 				      BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE);
-		btrfs_csum_final(crc, (char *)&sb->csum[0]);
+		btrfs_csum_final(crc, &sb->csum[0]);
 
 		/*
 		 * super_copy is BTRFS_SUPER_INFO_SIZE bytes and is
@@ -1653,7 +1696,7 @@ static int write_dev_supers(struct btrfs_root *root,
 		crc = ~(u32)0;
 		crc = btrfs_csum_data(NULL, (char *)sb + BTRFS_CSUM_SIZE, crc,
 				      BTRFS_SUPER_INFO_SIZE - BTRFS_CSUM_SIZE);
-		btrfs_csum_final(crc, (char *)&sb->csum[0]);
+		btrfs_csum_final(crc, &sb->csum[0]);
 
 		/*
 		 * super_copy is BTRFS_SUPER_INFO_SIZE bytes and is

@@ -10,7 +10,7 @@ fi
 dnl library version
 LIBBTRFS_MAJOR=0
 LIBBTRFS_MINOR=1
-LIBBTRFS_PATCHLEVEL=1
+LIBBTRFS_PATCHLEVEL=2
 
 CFLAGS=${CFLAGS:-"-g -O1 -Wall -D_FORTIFY_SOURCE=2"}
 AC_SUBST([CFLAGS])
@@ -145,8 +145,16 @@ if test "$DISABLE_BTRFSCONVERT" = 0 && test "x$convertfs" = "x"; then
 	AC_MSG_ERROR([no filesystems for convert, use --disable-convert instead])
 fi
 
+HAVE_OWN_FIEMAP_EXTENT_SHARED_DEFINE=0
 AX_CHECK_DEFINE([linux/fiemap.h], [FIEMAP_EXTENT_SHARED], [],
-		[AC_MSG_ERROR([no definition of FIEMAP_EXTENT_SHARED found])])
+		[HAVE_OWN_FIEMAP_EXTENT_SHARED_DEFINE=1
+		 AC_MSG_WARN([no definition of FIEMAP_EXTENT_SHARED found, probably old kernel, will use own defintion, 'btrfs fi du' might report wrong numbers])])
+
+if test "x$HAVE_OWN_FIEMAP_EXTENT_SHARED_DEFINE" == "x1"; then
+AC_DEFINE([HAVE_OWN_FIEMAP_EXTENT_SHARED_DEFINE], [1], [We defined FIEMAP_EXTENT_SHARED])
+else
+AC_DEFINE([HAVE_OWN_FIEMAP_EXTENT_SHARED_DEFINE], [0], [We did not define FIEMAP_EXTENT_SHARED])
+fi
 
 dnl Define <NAME>_LIBS= and <NAME>_CFLAGS= by pkg-config
 dnl
@@ -162,7 +170,13 @@ PKG_STATIC(UUID_LIBS_STATIC, [uuid])
 PKG_CHECK_MODULES(ZLIB, [zlib])
 PKG_STATIC(ZLIB_LIBS_STATIC, [zlib])
 
-UDEVDIR="$(pkg-config udev --variable=udevdir)"
+# udev v190 introduced the btrfs builtin and a udev rule to use it.
+# Our udev rule gives us the friendly dm names but isn't required (or valid)
+# on earlier releases.
+UDEVDIR=
+if pkg-config udev --atleast-version 190; then
+	UDEVDIR="$(pkg-config udev --variable=udevdir)"
+fi
 AC_SUBST(UDEVDIR)
 
 dnl lzo library does not provide pkg-config, let use classic way

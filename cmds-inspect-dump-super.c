@@ -37,7 +37,7 @@
 
 static int check_csum_sblock(void *sb, int csum_size)
 {
-	char result[BTRFS_CSUM_SIZE];
+	u8 result[BTRFS_CSUM_SIZE];
 	u32 crc = ~(u32)0;
 
 	crc = btrfs_csum_data(NULL, (char *)sb + BTRFS_CSUM_SIZE,
@@ -100,20 +100,19 @@ static void print_sys_chunk_array(struct btrfs_super_block *sb)
 			if (cur_offset + len > array_size)
 				goto out_short_read;
 
-			print_chunk(buf, chunk);
 			num_stripes = btrfs_chunk_num_stripes(buf, chunk);
 			if (!num_stripes) {
-				printk(
-	    "ERROR: invalid number of stripes %u in sys_array at offset %u\n",
+				error(
+			"invalid number of stripes %u in sys_array at offset %u",
 					num_stripes, cur_offset);
 				break;
 			}
 			len = btrfs_chunk_item_size(num_stripes);
 			if (cur_offset + len > array_size)
 				goto out_short_read;
+			print_chunk(buf, chunk);
 		} else {
-			printk(
-		"ERROR: unexpected item type %u in sys_array at offset %u\n",
+			error("unexpected item type %u in sys_array at offset %u",
 				(u32)key.type, cur_offset);
 			break;
 		}
@@ -129,7 +128,7 @@ out:
 	return;
 
 out_short_read:
-	printk("ERROR: sys_array too short to read %u bytes at offset %u\n",
+	error("sys_array too short to read %u bytes at offset %u",
 			len, cur_offset);
 	free(buf);
 }
@@ -197,6 +196,16 @@ struct readable_flag_entry {
 	u64 bit;
 	char *output;
 };
+
+#define DEF_COMPAT_RO_FLAG_ENTRY(bit_name)		\
+	{BTRFS_FEATURE_COMPAT_RO_##bit_name, #bit_name}
+
+static struct readable_flag_entry compat_ro_flags_array[] = {
+	DEF_COMPAT_RO_FLAG_ENTRY(FREE_SPACE_TREE),
+	DEF_COMPAT_RO_FLAG_ENTRY(FREE_SPACE_TREE_VALID),
+};
+static const int compat_ro_flags_num = sizeof(compat_ro_flags_array) /
+				       sizeof(struct readable_flag_entry);
 
 #define DEF_INCOMPAT_FLAG_ENTRY(bit_name)		\
 	{BTRFS_FEATURE_INCOMPAT_##bit_name, #bit_name}
@@ -269,6 +278,19 @@ static void __print_readable_flag(u64 flag, struct readable_flag_entry *array,
 	printf(")\n");
 }
 
+static void print_readable_compat_ro_flag(u64 flag)
+{
+	/*
+	 * We know about the FREE_SPACE_TREE{,_VALID} bits, but we don't
+	 * actually support them yet.
+	 */
+	return __print_readable_flag(flag, compat_ro_flags_array,
+				     compat_ro_flags_num,
+				     BTRFS_FEATURE_COMPAT_RO_SUPP |
+				     BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE |
+				     BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID);
+}
+
 static void print_readable_incompat_flag(u64 flag)
 {
 	return __print_readable_flag(flag, incompat_flags_array,
@@ -287,11 +309,29 @@ static void dump_superblock(struct btrfs_super_block *sb, int full)
 	int i;
 	char *s, buf[BTRFS_UUID_UNPARSED_SIZE];
 	u8 *p;
+	u32 csum_size;
+	u16 csum_type;
+
+	csum_type = btrfs_super_csum_type(sb);
+	csum_size = BTRFS_CSUM_SIZE;
+	printf("csum_type\t\t%hu (", csum_type);
+	if (csum_type >= ARRAY_SIZE(btrfs_csum_sizes)) {
+		printf("INVALID");
+	} else {
+		if (csum_type == BTRFS_CSUM_TYPE_CRC32) {
+			printf("crc32c");
+			csum_size = btrfs_csum_sizes[csum_type];
+		} else {
+			printf("unknown");
+		}
+	}
+	printf(")\n");
+	printf("csum_size\t\t%llu\n", (unsigned long long)csum_size);
 
 	printf("csum\t\t\t0x");
-	for (i = 0, p = sb->csum; i < btrfs_super_csum_size(sb); i++)
+	for (i = 0, p = sb->csum; i < csum_size; i++)
 		printf("%02x", p[i]);
-	if (check_csum_sblock(sb, btrfs_super_csum_size(sb)))
+	if (check_csum_sblock(sb, csum_size))
 		printf(" [match]");
 	else
 		printf(" [DON'T MATCH]");
@@ -360,13 +400,10 @@ static void dump_superblock(struct btrfs_super_block *sb, int full)
 	       (unsigned long long)btrfs_super_compat_flags(sb));
 	printf("compat_ro_flags\t\t0x%llx\n",
 	       (unsigned long long)btrfs_super_compat_ro_flags(sb));
+	print_readable_compat_ro_flag(btrfs_super_compat_ro_flags(sb));
 	printf("incompat_flags\t\t0x%llx\n",
 	       (unsigned long long)btrfs_super_incompat_flags(sb));
 	print_readable_incompat_flag(btrfs_super_incompat_flags(sb));
-	printf("csum_type\t\t%llu\n",
-	       (unsigned long long)btrfs_super_csum_type(sb));
-	printf("csum_size\t\t%llu\n",
-	       (unsigned long long)btrfs_super_csum_size(sb));
 	printf("cache_generation\t%llu\n",
 	       (unsigned long long)btrfs_super_cache_generation(sb));
 	printf("uuid_tree_generation\t%llu\n",
@@ -444,11 +481,18 @@ static int load_and_dump_sb(char *filename, int fd, u64 sb_bytenr, int full,
 const char * const cmd_inspect_dump_super_usage[] = {
 	"btrfs inspect-internal dump-super [options] device [device...]",
 	"Dump superblock from a device in a textual form",
-	"-f|--full           print full superblock information",
-	"-a|--all            print information about all superblocks",
-	"-i <super_mirror>   specify which mirror to print out",
-	"-F|--force          attempt to dump superblocks with bad magic",
-	"-s <bytenr>         specify alternate superblock offset",
+	"-f|--full             print full superblock information, backup roots etc.",
+	"-a|--all              print information about all superblocks",
+	"-s|--super <super>    specify which copy to print out (values: 0, 1, 2)",
+	"-F|--force            attempt to dump superblocks with bad magic",
+	"--bytenr <offset>     specify alternate superblock offset",
+	"",
+	"Deprecated syntax:",
+	"-s <bytenr>           specify alternate superblock offset, values other than 0, 1, 2",
+	"                      will be interpreted as --bytenr for backward compatibility,",
+	"                      option renamed for consistency with other tools (eg. check)",
+	"-i <super>            specify which copy to print out (values: 0, 1, 2), now moved",
+	"                      to -s|--super",
 	NULL
 };
 
@@ -470,6 +514,7 @@ int cmd_inspect_dump_super(int argc, char **argv)
 			{"all", no_argument, NULL, 'a'},
 			{"full", no_argument, NULL, 'f'},
 			{"force", no_argument, NULL, 'F'},
+			{"super", required_argument, NULL, 's' },
 			{NULL, 0, NULL, 0}
 		};
 
@@ -479,11 +524,13 @@ int cmd_inspect_dump_super(int argc, char **argv)
 
 		switch (c) {
 		case 'i':
+			warning(
+			    "option -i is deprecated, please use -s or --super");
 			arg = arg_strtou64(optarg);
 			if (arg >= BTRFS_SUPER_MIRROR_MAX) {
 				error("super mirror too big: %llu >= %d",
 					arg, BTRFS_SUPER_MIRROR_MAX);
-				usage(cmd_inspect_dump_super_usage);
+				return 1;
 			}
 			sb_bytenr = btrfs_sb_offset(arg);
 			break;
@@ -498,7 +545,15 @@ int cmd_inspect_dump_super(int argc, char **argv)
 			force = 1;
 			break;
 		case 's':
-			sb_bytenr = arg_strtou64(optarg);
+			arg = arg_strtou64(optarg);
+			if (BTRFS_SUPER_MIRROR_MAX <= arg) {
+				warning(
+		"deprecated use of -s <bytenr> with %llu, assuming --bytenr",
+						(unsigned long long)arg);
+				sb_bytenr = arg;
+			} else {
+				sb_bytenr = btrfs_sb_offset(arg);
+			}
 			all = 0;
 			break;
 		default:
@@ -511,7 +566,7 @@ int cmd_inspect_dump_super(int argc, char **argv)
 
 	for (i = optind; i < argc; i++) {
 		filename = argv[i];
-		fd = open(filename, O_RDONLY, 0666);
+		fd = open(filename, O_RDONLY);
 		if (fd < 0) {
 			error("cannot open %s: %s", filename, strerror(errno));
 			ret = 1;

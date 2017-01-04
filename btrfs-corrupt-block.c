@@ -65,7 +65,7 @@ static int debug_corrupt_block(struct extent_buffer *eb,
 			"mirror %d logical %llu physical %llu device %s\n",
 			mirror_num, (unsigned long long)bytenr,
 			(unsigned long long)eb->dev_bytenr, device->name);
-		kfree(multi);
+		free(multi);
 
 		if (!copy || mirror_num == copy) {
 			ret = read_extent_from_disk(eb, 0, eb->len);
@@ -103,32 +103,24 @@ static int debug_corrupt_block(struct extent_buffer *eb,
 
 static void print_usage(int ret)
 {
-	fprintf(stderr, "usage: btrfs-corrupt-block [options] device\n");
-	fprintf(stderr, "\t-l Logical extent to be corrupted\n");
-	fprintf(stderr, "\t-c Copy of the extent to be corrupted"
-		" (usually 1 or 2, default: 0)\n");
-	fprintf(stderr, "\t-b Number of bytes to be corrupted\n");
-	fprintf(stderr, "\t-e Extent to be corrupted\n");
-	fprintf(stderr, "\t-E The whole extent tree to be corrupted\n");
-	fprintf(stderr, "\t-u Given chunk item to be corrupted\n");
-	fprintf(stderr, "\t-U The whole chunk tree to be corrupted\n");
-	fprintf(stderr, "\t-i The inode item to corrupt (must also specify "
-		"the field to corrupt)\n");
-	fprintf(stderr, "\t-x The file extent item to corrupt (must also "
-		"specify -i for the inode and -f for the field to corrupt)\n");
-	fprintf(stderr, "\t-m The metadata block to corrupt (must also "
-		"specify -f for the field to corrupt)\n");
-	fprintf(stderr, "\t-K The key to corrupt in the format "
-		"<num>,<num>,<num> (must also specify -f for the field)\n");
-	fprintf(stderr, "\t-f The field in the item to corrupt\n");
-	fprintf(stderr, "\t-I An item to corrupt (must also specify the field "
-		"to corrupt and a root+key for the item)\n");
-	fprintf(stderr, "\t-D Corrupt a dir item, must specify key and field\n");
-	fprintf(stderr, "\t-d Delete this item (must specify -K)\n");
-	fprintf(stderr, "\t-r Operate on this root (only works with -d)\n");
-	fprintf(stderr, "\t-C Delete a csum for the specified bytenr.  When "
-		"used with -b it'll delete that many bytes, otherwise it's "
-		"just sectorsize\n");
+	printf("usage: btrfs-corrupt-block [options] device\n");
+	printf("\t-l   Logical extent to be corrupted\n");
+	printf("\t-c   Copy of the extent to be corrupted (usually 1 or 2, default: 0)\n");
+	printf("\t-b   Number of bytes to be corrupted\n");
+	printf("\t-e   Extent to be corrupted\n");
+	printf("\t-E   The whole extent tree to be corrupted\n");
+	printf("\t-u   Given chunk item to be corrupted\n");
+	printf("\t-U   The whole chunk tree to be corrupted\n");
+	printf("\t-i   The inode item to corrupt (must also specify the field to corrupt)\n");
+	printf("\t-x   The file extent item to corrupt (must also specify -i for the inode and -f for the field to corrupt)\n");
+	printf("\t-m   The metadata block to corrupt (must also specify -f for the field to corrupt)\n");
+	printf("\t-K   The key to corrupt in the format <num>,<num>,<num> (must also specify -f for the field)\n");
+	printf("\t-f   The field in the item to corrupt\n");
+	printf("\t-I   An item to corrupt (must also specify the field to corrupt and a root+key for the item)\n");
+	printf("\t-D   Corrupt a dir item, must specify key and field\n");
+	printf("\t-d   Delete this item (must specify -K)\n");
+	printf("\t-r   Operate on this root (only works with -d)\n");
+	printf("\t-C   Delete a csum for the specified bytenr.  When used with -b it'll delete that many bytes, otherwise it's just sectorsize\n");
 	exit(ret);
 }
 
@@ -907,7 +899,11 @@ static int corrupt_item_nocow(struct btrfs_trans_handle *trans,
 	if (slot == 0)
 		del = 0;
 	/* Only accept valid eb */
-	BUG_ON(!leaf->data || slot >= btrfs_header_nritems(leaf));
+	if (slot >= btrfs_header_nritems(leaf)) {
+		error("invalid eb: no data or slot out of range: %d >= %d",
+				slot, btrfs_header_nritems(leaf));
+		return -EINVAL;
+	}
 	btrfs_item_key_to_cpu(leaf, &key, slot);
 	if (del) {
 		fprintf(stdout, "Deleting key and data [%llu, %u, %llu].\n",

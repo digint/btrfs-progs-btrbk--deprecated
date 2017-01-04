@@ -360,13 +360,19 @@ static int cmd_qgroup_show(int argc, char **argv)
 	path = argv[optind];
 	fd = btrfs_open_dir(path, &dirstream, 1);
 	if (fd < 0) {
-		btrfs_qgroup_free_filter_set(filter_set);
-		btrfs_qgroup_free_comparer_set(comparer_set);
+		free(filter_set);
+		free(comparer_set);
 		return 1;
 	}
 
 	if (filter_flag) {
-		qgroupid = btrfs_get_path_rootid(fd);
+		ret = lookup_path_rootid(fd, &qgroupid);
+		if (ret < 0) {
+			error("cannot resolve rootid for %s: %s",
+					path, strerror(-ret));
+			close_file_or_dir(fd, dirstream);
+			goto out;
+		}
 		if (filter_flag & 0x1)
 			btrfs_qgroup_setup_filter(&filter_set,
 					BTRFS_QGROUP_FILTER_ALL_PARENT,
@@ -382,6 +388,7 @@ static int cmd_qgroup_show(int argc, char **argv)
 	if (ret < 0)
 		error("can't list qgroups: %s", strerror(e));
 
+out:
 	return !!ret;
 }
 

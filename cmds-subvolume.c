@@ -128,7 +128,7 @@ static int cmd_subvol_create(int argc, char **argv)
 	DIR	*dirstream = NULL;
 
 	while (1) {
-		int c = getopt(argc, argv, "c:i:v");
+		int c = getopt(argc, argv, "c:i:");
 		if (c < 0)
 			break;
 
@@ -245,6 +245,7 @@ static const char * const cmd_subvol_delete_usage[] = {
 	"",
 	"-c|--commit-after      wait for transaction commit at the end of the operation",
 	"-C|--commit-each       wait for transaction commit after deleting each subvolume",
+	"-v|--verbose           verbose output of operations",
 	NULL
 };
 
@@ -267,10 +268,11 @@ int cmd_subvol_delete(int argc, char **argv)
 		static const struct option long_options[] = {
 			{"commit-after", no_argument, NULL, 'c'},  /* commit mode 1 */
 			{"commit-each", no_argument, NULL, 'C'},  /* commit mode 2 */
+			{"verbose", no_argument, NULL, 'v'},
 			{NULL, 0, NULL, 0}
 		};
 
-		c = getopt_long(argc, argv, "cC", long_options, NULL);
+		c = getopt_long(argc, argv, "cCv", long_options, NULL);
 		if (c < 0)
 			break;
 
@@ -429,10 +431,10 @@ int cmd_subvol_list(int argc, char **argv)
 	u64 top_id;
 	int ret = -1, uerr = 0;
 	char *subvol;
-	int is_tab_result = 0;
 	int is_list_all = 0;
 	int is_only_in_path = 0;
 	DIR *dirstream = NULL;
+	enum btrfs_list_layout layout = BTRFS_LIST_LAYOUT_DEFAULT;
 
 	filter_set = btrfs_list_alloc_filter_set();
 	comparer_set = btrfs_list_alloc_comparer_set();
@@ -471,7 +473,7 @@ int cmd_subvol_list(int argc, char **argv)
 			is_only_in_path = 1;
 			break;
 		case 't':
-			is_tab_result = 1;
+			layout = BTRFS_LIST_LAYOUT_TABLE;
 			break;
 		case 's':
 			btrfs_list_setup_filter(&filter_set,
@@ -528,10 +530,6 @@ int cmd_subvol_list(int argc, char **argv)
 		}
 	}
 
-	if (flags)
-		btrfs_list_setup_filter(&filter_set, BTRFS_LIST_FILTER_FLAGS,
-					flags);
-
 	if (check_argc_exact(argc - optind, 1)) {
 		uerr = 1;
 		goto out;
@@ -545,11 +543,13 @@ int cmd_subvol_list(int argc, char **argv)
 		goto out;
 	}
 
+	if (flags)
+		btrfs_list_setup_filter(&filter_set, BTRFS_LIST_FILTER_FLAGS,
+					flags);
+
 	ret = btrfs_list_get_path_rootid(fd, &top_id);
-	if (ret) {
-		error("can't get rootid for '%s'", subvol);
+	if (ret)
 		goto out;
-	}
 
 	if (is_list_all)
 		btrfs_list_setup_filter(&filter_set,
@@ -566,21 +566,15 @@ int cmd_subvol_list(int argc, char **argv)
 	btrfs_list_setup_print_column(BTRFS_LIST_TOP_LEVEL);
 	btrfs_list_setup_print_column(BTRFS_LIST_PATH);
 
-	if (is_tab_result)
-		ret = btrfs_list_subvols_print(fd, filter_set, comparer_set,
-				BTRFS_LIST_LAYOUT_TABLE,
-				!is_list_all && !is_only_in_path, NULL);
-	else
-		ret = btrfs_list_subvols_print(fd, filter_set, comparer_set,
-				BTRFS_LIST_LAYOUT_DEFAULT,
-				!is_list_all && !is_only_in_path, NULL);
+	ret = btrfs_list_subvols_print(fd, filter_set, comparer_set,
+			layout, !is_list_all && !is_only_in_path, NULL);
 
 out:
 	close_file_or_dir(fd, dirstream);
 	if (filter_set)
-		btrfs_list_free_filter_set(filter_set);
+		free(filter_set);
 	if (comparer_set)
-		btrfs_list_free_comparer_set(comparer_set);
+		free(comparer_set);
 	if (uerr)
 		usage(cmd_subvol_list_usage);
 	return !!ret;
@@ -801,7 +795,7 @@ static int cmd_subvol_get_default(int argc, char **argv)
 		BTRFS_LIST_LAYOUT_DEFAULT, 1, NULL);
 
 	if (filter_set)
-		btrfs_list_free_filter_set(filter_set);
+		free(filter_set);
 out:
 	close_file_or_dir(fd, dirstream);
 	return !!ret;
@@ -927,21 +921,12 @@ int cmd_subvol_show(int argc, char **argv)
 	}
 
 	ret = get_subvol_info(fullpath, &get_ri);
-	if (ret == 2) {
-		/*
-		 * Since the top level btrfs was given don't
-		 * take that as error
-		 */
-		printf("%s is toplevel subvolume\n", fullpath);
-		ret = 0;
-		goto out;
-	}
 	if (ret) {
 		if (ret < 0) {
-			error("Failed to get subvol info %s: %s\n",
+			error("Failed to get subvol info %s: %s",
 					fullpath, strerror(-ret));
 		} else {
-			error("Failed to get subvol info %s: %d\n",
+			error("Failed to get subvol info %s: %d",
 					fullpath, ret);
 		}
 		return ret;
@@ -1009,7 +994,7 @@ out:
 	free(get_ri.path);
 	free(get_ri.name);
 	free(get_ri.full_path);
-	btrfs_list_free_filter_set(filter_set);
+	free(filter_set);
 
 	close_file_or_dir(fd, dirstream1);
 	free(fullpath);
@@ -1249,7 +1234,7 @@ static int cmd_subvol_sync(int argc, char **argv)
 			}
 			if (id < BTRFS_FIRST_FREE_OBJECTID
 					|| id > BTRFS_LAST_FREE_OBJECTID) {
-				error("subvolume id %s out of range\n", arg);
+				error("subvolume id %s out of range", arg);
 				ret = 1;
 				goto out;
 			}
