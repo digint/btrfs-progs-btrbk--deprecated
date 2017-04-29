@@ -35,6 +35,7 @@
 #include "utils.h"
 #include "volumes.h"
 #include "extent_io.h"
+#include "help.h"
 
 #define HEADER_MAGIC		0xbd5c25e27295668bULL
 #define MAX_PENDING_SIZE	(256 * 1024)
@@ -550,7 +551,7 @@ static void sanitize_name(struct metadump_struct *md, u8 *dst,
 		return;
 	}
 
-	memcpy(eb->data, dst, eb->len);
+	memcpy(eb->data, src->data, src->len);
 
 	switch (key->type) {
 	case BTRFS_DIR_ITEM_KEY:
@@ -1128,8 +1129,7 @@ static int copy_tree_blocks(struct btrfs_root *root, struct extent_buffer *eb,
 }
 
 static int copy_log_trees(struct btrfs_root *root,
-			  struct metadump_struct *metadump,
-			  struct btrfs_path *path)
+			  struct metadump_struct *metadump)
 {
 	u64 blocknr = btrfs_super_log_root(root->fs_info->super_copy);
 
@@ -1374,7 +1374,7 @@ static int create_metadump(const char *input, FILE *out, int num_threads,
 		}
 	}
 
-	ret = copy_log_trees(root, &metadump, &path);
+	ret = copy_log_trees(root, &metadump);
 	if (ret) {
 		err = ret;
 		goto out;
@@ -2533,7 +2533,7 @@ static int restore_metadump(const char *input, FILE *out, int old_restore,
 	ret = mdrestore_init(&mdrestore, in, out, old_restore, num_threads,
 			     fixup_offset, info, multi_devices);
 	if (ret) {
-		error("failed to intialize metadata restore state: %d", ret);
+		error("failed to initialize metadata restore state: %d", ret);
 		goto failed_cluster;
 	}
 
