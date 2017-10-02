@@ -108,15 +108,17 @@ int is_block_device(const char *file);
 int is_mount_point(const char *file);
 int check_arg_type(const char *input);
 int open_path_or_dev_mnt(const char *path, DIR **dirstream, int verbose);
+int btrfs_open(const char *path, DIR **dirstream, int verbose, int dir_only);
 int btrfs_open_dir(const char *path, DIR **dirstream, int verbose);
+int btrfs_open_file_or_dir(const char *path, DIR **dirstream, int verbose);
 u64 btrfs_device_size(int fd, struct stat *st);
 /* Helper to always get proper size of the destination string */
 #define strncpy_null(dest, src) __strncpy_null(dest, src, sizeof(dest))
 int get_label_mounted(const char *mount_path, char *labelp);
 int get_label_unmounted(const char *dev, char *label);
 int group_profile_max_safe_loss(u64 flags);
-int csum_tree_block(struct btrfs_root *root, struct extent_buffer *buf,
-			   int verify);
+int csum_tree_block(struct btrfs_fs_info *root, struct extent_buffer *buf,
+		    int verify);
 int ask_user(const char *question);
 int lookup_path_rootid(int fd, u64 *rootid);
 int btrfs_scan_devices(void);
@@ -134,7 +136,10 @@ int test_isdir(const char *path);
 
 const char *subvol_strip_mountpoint(const char *mnt, const char *full_path);
 int get_subvol_info(const char *fullpath, struct root_info *get_ri);
-
+int get_subvol_info_by_rootid(const char *mnt, struct root_info *get_ri,
+							u64 rootid_arg);
+int get_subvol_info_by_uuid(const char *mnt, struct root_info *get_ri,
+							u8 *uuid_arg);
 int find_next_key(struct btrfs_path *path, struct btrfs_key *key);
 const char* btrfs_group_type_str(u64 flag);
 const char* btrfs_group_profile_str(u64 flag);

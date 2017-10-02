@@ -35,6 +35,7 @@ btrfs-select-super
 btrfs-calc-size
 btrfs-crc
 btrfstune
+mktables
 libbtrfs.a
 libbtrfs.so
 libbtrfs.so.0

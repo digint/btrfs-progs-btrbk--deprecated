@@ -18,6 +18,7 @@
 
 #include "kerncompat.h"
 #include <linux/limits.h>
+#include <pthread.h>
 #include "disk-io.h"
 #include "transaction.h"
 #include "utils.h"
@@ -34,10 +35,12 @@ static int ext2_open_fs(struct btrfs_convert_context *cctx, const char *name)
 	ext2_filsys ext2_fs;
 	ext2_ino_t ino;
 	u32 ro_feature;
+	int open_flag = EXT2_FLAG_SOFTSUPP_FEATURES | EXT2_FLAG_64BITS;
 
-	ret = ext2fs_open(name, 0, 0, 0, unix_io_manager, &ext2_fs);
+	ret = ext2fs_open(name, open_flag, 0, 0, unix_io_manager, &ext2_fs);
 	if (ret) {
-		fprintf(stderr, "ext2fs_open: %s\n", error_message(ret));
+		if (ret != EXT2_ET_BAD_MAGIC)
+			fprintf(stderr, "ext2fs_open: %s\n", error_message(ret));
 		return -1;
 	}
 	/*
@@ -148,11 +151,12 @@ static int ext2_read_used_space(struct btrfs_convert_context *cctx)
 		return -ENOMEM;
 
 	for (i = 0; i < fs->group_desc_count; i++) {
-		ret = ext2fs_get_block_bitmap_range(fs->block_map, blk_itr,
+		ret = ext2fs_get_block_bitmap_range2(fs->block_map, blk_itr,
 						block_nbytes * 8, block_bitmap);
 		if (ret) {
 			error("fail to get bitmap from ext2, %s",
-			      strerror(-ret));
+				error_message(ret));
+			ret = -EINVAL;
 			break;
 		}
 		ret = __ext2_add_one_block(fs, block_bitmap, i, used_tree);
@@ -289,7 +293,7 @@ static int ext2_create_file_extents(struct btrfs_trans_handle *trans,
 	char *buffer = NULL;
 	errcode_t err;
 	u32 last_block;
-	u32 sectorsize = root->sectorsize;
+	u32 sectorsize = root->fs_info->sectorsize;
 	u64 inode_size = btrfs_stack_inode_size(btrfs_inode);
 	struct blk_iterate_data data;
 
@@ -353,7 +357,7 @@ static int ext2_create_symlink(struct btrfs_trans_handle *trans,
 	int ret;
 	char *pathname;
 	u64 inode_size = btrfs_stack_inode_size(btrfs_inode);
-	if (ext2fs_inode_data_blocks(ext2_fs, ext2_inode)) {
+	if (ext2fs_inode_data_blocks2(ext2_fs, ext2_inode)) {
 		btrfs_set_stack_inode_size(btrfs_inode, inode_size + 1);
 		ret = ext2_create_file_extents(trans, root, objectid,
 				btrfs_inode, ext2_fs, ext2_ino,
@@ -420,27 +424,6 @@ static int ext2_xattr_check_entry(struct ext2_ext_attr_entry *entry,
 	    entry->e_value_offs + value_size > size)
 		return -EIO;
 	return 0;
-}
-
-static inline int ext2_acl_count(size_t size)
-{
-	ssize_t s;
-	size -= sizeof(ext2_acl_header);
-	s = size - 4 * sizeof(ext2_acl_entry_short);
-	if (s < 0) {
-		if (size % sizeof(ext2_acl_entry_short))
-			return -1;
-		return size / sizeof(ext2_acl_entry_short);
-	} else {
-		if (s % sizeof(ext2_acl_entry))
-			return -1;
-		return s / sizeof(ext2_acl_entry) + 4;
-	}
-}
-
-static inline size_t acl_ea_size(int count)
-{
-	return sizeof(acl_ea_header) + count * sizeof(acl_ea_entry);
 }
 
 static int ext2_acl_to_xattr(void *dst, const void *src,
@@ -627,9 +610,9 @@ static int ext2_copy_extended_attrs(struct btrfs_trans_handle *trans,
 		ret = -ENOMEM;
 		goto out;
 	}
-	err = ext2fs_read_ext_attr(ext2_fs, ext2_inode->i_file_acl, buffer);
+	err = ext2fs_read_ext_attr2(ext2_fs, ext2_inode->i_file_acl, buffer);
 	if (err) {
-		fprintf(stderr, "ext2fs_read_ext_attr: %s\n",
+		fprintf(stderr, "ext2fs_read_ext_attr2: %s\n",
 			error_message(err));
 		ret = -1;
 		goto out;
@@ -657,19 +640,10 @@ out:
 		free(ext2_inode);
 	return ret;
 }
-#define MINORBITS	20
-#define MKDEV(ma, mi)	(((ma) << MINORBITS) | (mi))
 
 static inline dev_t old_decode_dev(u16 val)
 {
 	return MKDEV((val >> 8) & 255, val & 255);
-}
-
-static inline dev_t new_decode_dev(u32 dev)
-{
-	unsigned major = (dev & 0xfff00) >> 8;
-	unsigned minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
-	return MKDEV(major, minor);
 }
 
 static void ext2_copy_inode_item(struct btrfs_inode_item *dst,
@@ -711,7 +685,7 @@ static void ext2_copy_inode_item(struct btrfs_inode_item *dst,
 				old_decode_dev(src->i_block[0]));
 		} else {
 			btrfs_set_stack_inode_rdev(dst,
-				new_decode_dev(src->i_block[1]));
+				decode_dev(src->i_block[1]));
 		}
 	}
 	memset(&dst->reserved, 0, sizeof(dst->reserved));
@@ -742,7 +716,7 @@ static int ext2_check_state(struct btrfs_convert_context *cctx)
 static void ext2_convert_inode_flags(struct btrfs_inode_item *dst,
 				     struct ext2_inode *src)
 {
-	u64 flags = 0;
+	u64 flags = btrfs_stack_inode_flags(dst);
 
 	COPY_ONE_EXT2_FLAG(flags, src, APPEND);
 	COPY_ONE_EXT2_FLAG(flags, src, SYNC);
@@ -831,8 +805,8 @@ static int ext2_copy_inodes(struct btrfs_convert_context *cctx,
 	struct btrfs_trans_handle *trans;
 
 	trans = btrfs_start_transaction(root, 1);
-	if (!trans)
-		return -ENOMEM;
+	if (IS_ERR(trans))
+		return PTR_ERR(trans);
 	err = ext2fs_open_inode_scan(ext2_fs, 0, &ext2_scan);
 	if (err) {
 		fprintf(stderr, "ext2fs_open_inode_scan: %s\n", error_message(err));
@@ -849,14 +823,16 @@ static int ext2_copy_inodes(struct btrfs_convert_context *cctx,
 		ret = ext2_copy_single_inode(trans, root,
 					objectid, ext2_fs, ext2_ino,
 					&ext2_inode, convert_flags);
+		pthread_mutex_lock(&p->mutex);
 		p->cur_copy_inodes++;
+		pthread_mutex_unlock(&p->mutex);
 		if (ret)
 			return ret;
 		if (trans->blocks_used >= 4096) {
 			ret = btrfs_commit_transaction(trans, root);
 			BUG_ON(ret);
 			trans = btrfs_start_transaction(root, 1);
-			BUG_ON(!trans);
+			BUG_ON(IS_ERR(trans));
 		}
 	}
 	if (err) {
