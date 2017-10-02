@@ -261,7 +261,6 @@ static const struct cmd_group btrfs_cmd_group = {
 	},
 };
 
-#ifndef DISABLE_BTRFS_MAIN
 int main(int argc, char **argv)
 {
 	const struct cmd_struct *cmd;
@@ -306,4 +305,3 @@ int main(int argc, char **argv)
 
 	exit(ret);
 }
-#endif

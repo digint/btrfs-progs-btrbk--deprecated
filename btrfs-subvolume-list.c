@@ -1,9 +1,8 @@
-/* Proof of concept: dirty include of c-file, add main() */
-
-#define DISABLE_BTRFS_MAIN
-#include "btrfs.c"
+/* btrfs-progs-btrbk: btrfs-subvolume-list */
 
 int cmd_subvol_list(int argc, char **argv);
+
+int handle_command_group(const struct cmd_group *grp, int argc, char **argv) { ; }
 
 
 // needs CAP_DAC_READ_SEARCH, CAP_FOWNER, CAP_SYS_ADMIN

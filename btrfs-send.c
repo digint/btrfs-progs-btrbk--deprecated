@@ -1,7 +1,4 @@
-/* Proof of concept: dirty include of c-file, add main() */
-
-#define DISABLE_BTRFS_MAIN
-#include "btrfs.c"
+/* btrfs-progs-btrbk: btrfs-send */
 
 int cmd_send(int argc, char **argv);
 
