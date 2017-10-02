@@ -259,7 +259,7 @@ static const char * const cmd_qgroup_destroy_usage[] = {
 	NULL
 };
 
-static int cmd_qgroup_destroy(int argc, char **argv)
+int cmd_qgroup_destroy(int argc, char **argv)
 {
 	int ret;
 

@@ -10,6 +10,7 @@ specific btrfs command groups:
   * btrfs-subvolume-delete
   * btrfs-send
   * btrfs-receive
+  * btrfs-qgroup-destroy
 
 These binaries are used by btrbk if `backend btrbk-progs-btrbk` is set
 in btrbk.conf.

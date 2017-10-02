@@ -194,7 +194,8 @@ progs_btrfs_command_group = btrfs-send \
 	btrfs-subvolume-list \
 	btrfs-subvolume-show \
 	btrfs-subvolume-snapshot \
-	btrfs-subvolume-delete
+	btrfs-subvolume-delete \
+	btrfs-qgroup-destroy
 
 # PATCH: build only separated progs
 progs = $(progs_btrfs_command_group)
@@ -227,6 +228,7 @@ btrfs_subvolume_list_objects = cmds-subvolume.o
 btrfs_subvolume_show_objects = cmds-subvolume.o
 btrfs_subvolume_snapshot_objects = cmds-subvolume.o
 btrfs_subvolume_delete_objects = cmds-subvolume.o
+btrfs_qgroup_destroy_objects = cmds-qgroup.o
 
 # collect values of the variables above
 standalone_deps = $(foreach dep,$(patsubst %,%_objects,$(subst -,_,$(filter btrfs-%, $(progs)))),$($(dep)))
@@ -238,6 +240,7 @@ install_setcap_btrfs_subvolume_list = "cap_sys_admin,cap_fowner,cap_dac_read_sea
 install_setcap_btrfs_subvolume_show = "cap_sys_admin,cap_fowner,cap_dac_read_search"
 install_setcap_btrfs_subvolume_snapshot = "cap_sys_admin,cap_fowner,cap_dac_override,cap_dac_read_search"
 install_setcap_btrfs_subvolume_delete = "cap_sys_admin,cap_dac_override"
+install_setcap_btrfs_qgroup_destroy = "cap_sys_admin,cap_dac_override"
 
 SUBDIRS =
 BUILDDIRS = $(patsubst %,build-%,$(SUBDIRS))
