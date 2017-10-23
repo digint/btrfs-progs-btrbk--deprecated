@@ -235,7 +235,7 @@ standalone_deps = $(foreach dep,$(patsubst %,%_objects,$(subst -,_,$(filter btrf
 
 # linux capabilities (caps) needed; used by "install-setcap-%" below
 install_setcap_btrfs_send = "cap_sys_admin,cap_fowner,cap_dac_read_search"
-install_setcap_btrfs_receive = "cap_sys_admin,cap_fowner,cap_chown,cap_mknod,cap_dac_override,cap_dac_read_search"
+install_setcap_btrfs_receive = "cap_sys_admin,cap_fowner,cap_chown,cap_mknod,cap_setfcap,cap_dac_override,cap_dac_read_search"
 install_setcap_btrfs_subvolume_list = "cap_sys_admin,cap_fowner,cap_dac_read_search"
 install_setcap_btrfs_subvolume_show = "cap_sys_admin,cap_fowner,cap_dac_read_search"
 install_setcap_btrfs_subvolume_snapshot = "cap_sys_admin,cap_fowner,cap_dac_override,cap_dac_read_search"
