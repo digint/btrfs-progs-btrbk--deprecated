@@ -396,10 +396,12 @@ int read_extent_data(struct btrfs_fs_info *fs_info, char *data, u64 logical,
 	}
 	device = multi->stripes[0].dev;
 
-	if (device->fd <= 0)
-		goto err;
 	if (*len > max_len)
 		*len = max_len;
+	if (device->fd < 0) {
+		ret = -EIO;
+		goto err;
+	}
 
 	ret = pread64(device->fd, data, *len, multi->stripes[0].physical);
 	if (ret != *len)
@@ -1212,7 +1214,7 @@ struct btrfs_fs_info *open_ctree_fs_info(const char *filename,
 
 	ret = stat(filename, &st);
 	if (ret < 0) {
-		error("cannot stat '%s': %s", filename, strerror(errno));
+		error("cannot stat '%s': %m", filename);
 		return NULL;
 	}
 	if (!(((st.st_mode & S_IFMT) == S_IFREG) || ((st.st_mode & S_IFMT) == S_IFBLK))) {
@@ -1225,7 +1227,7 @@ struct btrfs_fs_info *open_ctree_fs_info(const char *filename,
 
 	fp = open(filename, oflags);
 	if (fp < 0) {
-		error("cannot open '%s': %s", filename, strerror(errno));
+		error("cannot open '%s': %m", filename);
 		return NULL;
 	}
 	info = __open_ctree_fd(fp, filename, sb_bytenr, root_tree_bytenr,
@@ -1419,6 +1421,23 @@ error_out:
 	return -EIO;
 }
 
+/*
+ * btrfs_read_dev_super - read a valid superblock from a block device
+ * @fd:		file descriptor of the device
+ * @sb:		buffer where the superblock is going to be read in
+ * @sb_bytenr:  offset of the particular superblock copy we want
+ * @sbflags:	flags controlling how the superblock is read
+ *
+ * This function is used by various btrfs comands to obtain a valid superblock.
+ *
+ * It's mode of operation is controlled by the @sb_bytenr and @sbdflags
+ * parameters. If SBREAD_RECOVER flag is set and @sb_bytenr is
+ * BTRFS_SUPER_INFO_OFFSET then the function reads all 3 superblock copies and
+ * returns the newest one. If SBREAD_RECOVER is not set then only a single
+ * copy is read, which one is decided by @sb_bytenr. If @sb_bytenr !=
+ * BTRFS_SUPER_INFO_OFFSET then the @sbflags is effectively ignored and only a
+ * single copy is read.
+ */
 int btrfs_read_dev_super(int fd, struct btrfs_super_block *sb, u64 sb_bytenr,
 			 unsigned sbflags)
 {
@@ -1549,14 +1568,12 @@ write_err:
 	if (ret > 0)
 		fprintf(stderr, "WARNING: failed to write all sb data\n");
 	else
-		fprintf(stderr, "WARNING: failed to write sb: %s\n",
-			strerror(errno));
+		fprintf(stderr, "WARNING: failed to write sb: %m\n");
 	return ret;
 }
 
 int write_all_supers(struct btrfs_fs_info *fs_info)
 {
-	struct list_head *cur;
 	struct list_head *head = &fs_info->fs_devices->devices;
 	struct btrfs_device *dev;
 	struct btrfs_super_block *sb;
@@ -1566,8 +1583,7 @@ int write_all_supers(struct btrfs_fs_info *fs_info)
 
 	sb = fs_info->super_copy;
 	dev_item = &sb->dev_item;
-	list_for_each(cur, head) {
-		dev = list_entry(cur, struct btrfs_device, dev_list);
+	list_for_each_entry(dev, head, dev_list) {
 		if (!dev->writeable)
 			continue;
 

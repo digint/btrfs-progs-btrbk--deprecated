@@ -115,7 +115,7 @@ void clean_args_no_options(int argc, char *argv[], const char * const *usagestr)
  * - "-- option1 option2 ..."
  * - "option1 option2 ..."
  */
-void clean_args_no_options_relaxed(int argc, char *argv[], const char * const *usagestr)
+void clean_args_no_options_relaxed(int argc, char *argv[])
 {
 	if (argc <= 1)
 		return;
@@ -128,12 +128,32 @@ static int do_usage_one_command(const char * const *usagestr,
 				unsigned int flags, FILE *outf)
 {
 	int pad = 4;
+	const char *prefix = "usage: ";
+	const char *pad_listing = "    ";
 
 	if (!usagestr || !*usagestr)
 		return -1;
 
-	fprintf(outf, "%s%s", (flags & USAGE_LISTING) ? "    " : "usage: ",
-		*usagestr++);
+	if (flags & USAGE_LISTING)
+		prefix = pad_listing;
+
+	fputs(prefix, outf);
+	if (strchr(*usagestr, '\n') == NULL) {
+		fputs(*usagestr, outf);
+	} else {
+		const char *c = *usagestr;
+		const char *nprefix = "       ";
+
+		if (flags & USAGE_LISTING)
+			nprefix = pad_listing;
+
+		for (c = *usagestr; *c; c++) {
+			fputc(*c, outf);
+			if (*c == '\n')
+				fputs(nprefix, outf);
+		}
+	}
+	usagestr++;
 
 	/* a short one-line description (mandatory) */
 	if ((flags & USAGE_SHORT) == 0)
