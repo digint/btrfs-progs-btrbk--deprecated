@@ -1,6 +1,9 @@
 Btrfs-progs-btrbk
 =================
 
+**Deprecated, please use cmds-separated-fscaps-v2 branch in
+[digint/btrfs-progs](https://github.com/digint/btrfs-progs/tree/cmds-separated-fscaps-v2)**
+
 This is a fork of btrfs-progs, allowing to build distinct binaries for
 specific btrfs command groups:
 
